@@ -4,66 +4,42 @@ import Browser
 import Browser.Navigation as Navigation exposing (Key)
 import Css
 import Css.Global
-import CubicSpline2d
-import Direction2d
-import Ellipse2d
-import Geometry.Svg
-import Html.Events.Extra
+import Hill exposing (Hill)
 import Html.Styled as Html exposing (Html)
 import Html.Styled.Attributes as Attrs
 import Html.Styled.Events
-import Pixels
-import Point2d
-import Route
-import Svg
-import Svg.Attributes
-import Svg.Styled as SvgStyled
-import Svg.Styled.Attributes as SvgStyledAttr
-import Svg.Styled.Events
+import Point exposing (Point(..), PointID)
+import Route exposing (Route)
+import Tailwind.Theme as Theme
 import Tailwind.Utilities as Tw
 import Url
 import Url.Parser
 
 
 type alias Model =
-    { chart : Chart
-    , key : Navigation.Key
-    , drag : Drag
+    { key : Navigation.Key
+    , route : Route
     }
-
-
-type Chart
-    = Chart String (List Point)
-
-
-type alias Point =
-    { title : String, value : Int }
-
-
-type Drag
-    = Dragging Int
-    | None
 
 
 type Msg
     = LinkClicked Browser.UrlRequest
     | UrlChanged Url.Url
-    | StartDrag Int
-    | StopDrag
-    | Move { dx : Int, dy : Int }
+    | UpdateTitle String
+    | UpdateHill Hill.Msg
+    | UpdatePointTitle PointID String
+    | UpdatePointColor PointID Css.Color
+    | AddPoint
+    | RemovePoint PointID
+    | Save
+    | Edit
+    | Cancel
 
 
 init : () -> Url.Url -> Key -> ( Model, Cmd Msg )
 init _ url key =
-    let
-        chart =
-            url
-                |> parseRoute
-                |> chartFromRoute
-    in
-    ( { chart = chart
+    ( { route = parseRoute url
       , key = key
-      , drag = None
       }
     , Cmd.none
     )
@@ -73,20 +49,10 @@ parseRoute : Url.Url -> Route.Route
 parseRoute url =
     case Url.Parser.parse Route.parser url of
         Nothing ->
-            Route.New
+            Route.Show "" (Hill.fromPoints [])
 
         Just route ->
             route
-
-
-chartFromRoute : Route.Route -> Chart
-chartFromRoute route =
-    case route of
-        Route.New ->
-            Chart "My title"
-                [ Point "Test point" 250
-                , Point "Test point" 750
-                ]
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -102,43 +68,97 @@ update msg model =
                     ( model, Cmd.none )
 
         UrlChanged url ->
+            ( { model | route = parseRoute url }, Cmd.none )
+
+        UpdateHill hillMsg ->
+            ( { model | route = mapHill (Hill.update hillMsg) model.route }, Cmd.none )
+
+        UpdateTitle title ->
+            ( { model | route = setTitle title model.route }, Cmd.none )
+
+        UpdatePointTitle pointID title ->
             ( { model
-                | chart =
-                    url
-                        |> parseRoute
-                        |> chartFromRoute
+                | route =
+                    mapHill
+                        (Hill.updatePoint (Point.map (\params -> { params | title = title }))
+                            pointID
+                        )
+                        model.route
               }
             , Cmd.none
             )
 
-        StartDrag index ->
-            ( { model | drag = Dragging index }, Cmd.none )
+        UpdatePointColor pointID color ->
+            ( { model
+                | route =
+                    mapHill
+                        (Hill.updatePoint (Point.map (\point -> { point | color = color })) pointID)
+                        model.route
+              }
+            , Cmd.none
+            )
 
-        StopDrag ->
-            ( { model | drag = None }, Cmd.none )
+        AddPoint ->
+            ( { model
+                | route =
+                    mapHill
+                        (Hill.addPoint
+                            { title = "Point"
+                            , color = Css.hex "#f00"
+                            , value = 100
+                            }
+                        )
+                        model.route
+              }
+            , Cmd.none
+            )
 
-        Move { dx } ->
-            case model.drag of
-                Dragging index ->
-                    ( { model | chart = updatePoint dx index model.chart }, Cmd.none )
+        RemovePoint id ->
+            ( { model | route = mapHill (Hill.removePoint id) model.route }, Cmd.none )
 
-                None ->
+        Save ->
+            case model.route of
+                Route.Show _ _ ->
                     ( model, Cmd.none )
 
+                Route.Edit title hill ->
+                    ( model, Navigation.pushUrl model.key (Route.toString (Route.Show title hill)) )
 
-updatePoint : Int -> Int -> Chart -> Chart
-updatePoint dx pos (Chart title points) =
-    Chart title
-        (List.indexedMap
-            (\index point ->
-                if index == pos then
-                    { point | value = clamp 0 1000 (point.value + dx) }
+        Edit ->
+            case model.route of
+                Route.Show title hill ->
+                    ( model, Navigation.pushUrl model.key (Route.toString (Route.Edit title hill)) )
 
-                else
-                    point
-            )
-            points
-        )
+                Route.Edit _ _ ->
+                    ( model, Cmd.none )
+
+        Cancel ->
+            case model.route of
+                Route.Show _ _ ->
+                    ( model, Cmd.none )
+
+                Route.Edit _ _ ->
+                    ( model, Navigation.back model.key 1 )
+
+
+mapHill : (Hill -> Hill) -> Route -> Route
+mapHill fn route =
+    case route of
+        Route.Show _ _ ->
+            route
+
+        Route.Edit title hill ->
+            Route.Edit title (fn hill)
+
+
+setTitle : String -> Route -> Route
+setTitle title route =
+    case route of
+        Route.Show _ _ ->
+            route
+
+        Route.Edit _ hill ->
+            Route.Edit title hill
 
 
 view : Model -> Browser.Document Msg
@@ -150,186 +170,170 @@ view model =
             , Html.div
                 [ Attrs.css
                     [ Tw.h_screen
-                    , Tw.w_screen
+                    , Tw.mx_auto
+                    , Tw.max_w_7xl
                     , Tw.p_8
                     , Tw.flex
+                    , Tw.flex_col
                     , Tw.items_center
-                    , Tw.justify_center
                     ]
-                , Html.Events.Extra.onMouseMove Move
-                , Html.Styled.Events.onMouseUp StopDrag
                 ]
-                [ viewChart model.chart ]
+                (case model.route of
+                    Route.Show title hill ->
+                        [ viewChart False title hill ]
+
+                    Route.Edit title hill ->
+                        [ viewChart True title hill
+                        , viewForm hill
+                        ]
+                )
             ]
     }
 
 
-viewChart : Chart -> Html Msg
-viewChart (Chart title points) =
-    Html.div [ Attrs.css [ Tw.flex, Tw.flex_col ] ]
-        [ viewTitle title
-        , SvgStyled.svg
-            [ SvgStyledAttr.width "1000"
-            , SvgStyledAttr.height "500"
-            , SvgStyledAttr.viewBox "0 0 1000 500"
+viewChart : Bool -> String -> Hill -> Html Msg
+viewChart editing title hill =
+    Html.div
+        [ Attrs.css
+            [ Tw.flex
+            , Tw.flex_col
+            , Tw.justify_center
+            , Tw.items_center
+            , Tw.w_full
             ]
-            (viewHill :: viewPoints points)
+        ]
+        [ viewTitle editing title
+        , Html.map UpdateHill (Hill.view hill)
         ]
 
 
-viewTitle : String -> Html Msg
-viewTitle title =
-    Html.div [ Attrs.css [ Tw.w_full, Tw.text_center ] ]
-        [ Html.h1
-            [ Attrs.css [ Tw.font_semibold, Tw.text_3xl ] ]
-            [ Html.text title ]
-        ]
-
-
-viewHill : Html Msg
-viewHill =
-    SvgStyled.g []
-        [ SvgStyled.fromUnstyled
-            (Geometry.Svg.cubicSpline2d
-                [ Svg.Attributes.stroke "blue"
-                , Svg.Attributes.fill "none"
-                , Svg.Attributes.class "hill-left"
+viewTitle : Bool -> String -> Html Msg
+viewTitle editing title =
+    Html.div [ Attrs.css [ Tw.flex, Tw.flex_col, Tw.w_full, Tw.text_center, Tw.gap_2 ] ]
+        [ Html.div [ Attrs.css [ Tw.flex, Tw.flex_row, Tw.justify_between, Tw.items_center, Tw.w_full ] ]
+            (if editing then
+                [ viewButton Cancel "Cancel"
+                , viewButton Save "Save"
                 ]
-                hillLeft
+
+             else
+                [ viewButton Edit "Edit"
+                , Html.div [ Attrs.css [] ] []
+                ]
             )
-        , SvgStyled.fromUnstyled
-            (Geometry.Svg.cubicSpline2d
-                [ Svg.Attributes.stroke "blue"
-                , Svg.Attributes.fill "none"
-                , Svg.Attributes.class "hill-right"
+        , if editing then
+            Html.input
+                [ Attrs.type_ "string"
+                , Html.Styled.Events.onInput UpdateTitle
+                , Attrs.value title
+                , Attrs.css [ Tw.font_semibold, Tw.text_3xl, Tw.text_center ]
                 ]
-                hillRight
-            )
+                []
 
-        -- Midline
-        , SvgStyled.line
-            [ SvgStyledAttr.x1 "500"
-            , SvgStyledAttr.y1 "100"
-            , SvgStyledAttr.x2 "500"
-            , SvgStyledAttr.y2 "440"
-            , SvgStyledAttr.stroke "#ccc"
-            , SvgStyledAttr.strokeDasharray "5 5"
-            , SvgStyledAttr.strokeWidth "2"
-            ]
-            []
-
-        -- Bottom line
-        , SvgStyled.line
-            [ SvgStyledAttr.x1 "50"
-            , SvgStyledAttr.y1 "400"
-            , SvgStyledAttr.x2 "950"
-            , SvgStyledAttr.y2 "400"
-            , SvgStyledAttr.stroke "#000"
-            , SvgStyledAttr.strokeWidth "2"
-            ]
-            []
-
-        -- Left text
-        , SvgStyled.text_
-            [ SvgStyledAttr.css
-                [ Css.property "text-anchor" "middle"
-                , Tw.font_bold
-                , Tw.text_lg
-                , Tw.select_none
-                ]
-            , SvgStyledAttr.x "250"
-            , SvgStyledAttr.y "425"
-            , SvgStyledAttr.fill "#ccc"
-            ]
-            [ SvgStyled.text "FIGURING THINGS OUT" ]
-
-        -- Left text
-        , SvgStyled.text_
-            [ SvgStyledAttr.css
-                [ Css.property "text-anchor" "middle"
-                , Tw.font_bold
-                , Tw.text_lg
-                , Tw.select_none
-                ]
-            , SvgStyledAttr.x "750"
-            , SvgStyledAttr.y "425"
-            , SvgStyledAttr.fill "#ccc"
-            ]
-            [ SvgStyled.text "MAKING IT HAPPEN" ]
+          else
+            Html.h1
+                [ Attrs.css [ Tw.font_semibold, Tw.text_3xl ] ]
+                [ Html.text title ]
         ]
 
 
-viewPoints : List Point -> List (Html Msg)
-viewPoints =
-    List.indexedMap viewPoint
+viewButton : Msg -> String -> Html Msg
+viewButton msg label =
+    Html.button
+        [ Html.Styled.Events.onClick msg
+        , Attrs.css
+            [ Tw.border_2
+            , Tw.relative
+            , Tw.rounded_md
+            , Tw.cursor_pointer
+            , Tw.text_lg
+            , Tw.px_4
+            , Tw.py_1
+            ]
+        ]
+        [ Html.text label ]
 
 
-hillRight =
-    CubicSpline2d.fromControlPoints
-        (Point2d.pixels 500 100)
-        (Point2d.pixels 700 100)
-        (Point2d.pixels 700 400)
-        (Point2d.pixels 900 400)
+viewForm : Hill -> Html Msg
+viewForm hill =
+    Html.div [ Attrs.css [ Tw.flex, Tw.flex_col, Tw.gap_4, Tw.w_full, Tw.max_w_2xl ] ]
+        (Html.div [ Attrs.css [ Tw.flex, Tw.justify_end ] ] [ viewButton AddPoint "Add point" ]
+            :: List.map viewPointForm (Hill.points hill)
+        )
 
 
-hillLeft =
-    CubicSpline2d.fromControlPoints
-        (Point2d.pixels 100 400)
-        (Point2d.pixels 300 400)
-        (Point2d.pixels 300 100)
-        (Point2d.pixels 500 100)
-
-
-viewPoint : Int -> Point -> Html Msg
-viewPoint index point =
+viewPointForm : Point -> Html Msg
+viewPointForm point =
     let
-        -- Calculate the correct percentage value on the left or right hill curve
-        samplePoint =
-            if point.value > 500 then
-                -- Right side of the hill
-                CubicSpline2d.pointOn hillRight ((toFloat point.value / 500) - 1)
-
-            else
-                -- left side of the hill
-                CubicSpline2d.pointOn hillLeft (toFloat point.value / 500)
-
-        coors =
-            Point2d.toRecord Pixels.toFloat samplePoint
-
-        ellipse =
-            Ellipse2d.with
-                { centerPoint = samplePoint
-                , xDirection = Direction2d.degrees 0
-                , xRadius = Pixels.float 8
-                , yRadius = Pixels.float 8
-                }
+        params =
+            Point.params point
     in
-    SvgStyled.g
-        [ Svg.Styled.Events.onMouseDown (StartDrag index)
+    Html.div [ Attrs.css [ Tw.flex, Tw.w_full, Tw.flex_row, Tw.gap_4 ] ]
+        [ Html.input
+            [ Attrs.type_ "string"
+            , Html.Styled.Events.onInput (UpdatePointTitle (Point.id point))
+            , Attrs.value params.title
+            , Attrs.css [ Tw.border, Tw.px_4, Tw.py_1, Tw.w_full, Tw.rounded_md ]
+            ]
+            []
+        , viewColorInput (Point.id point) params.color
         ]
-        [ SvgStyled.fromUnstyled
-            (Geometry.Svg.ellipse2d
-                [ Svg.Attributes.fill "orange"
-                , Svg.Attributes.style "cursor: move; stroke: #fff; stroke-width: 2px"
+
+
+viewColorInput : PointID -> Css.Color -> Html Msg
+viewColorInput pointID value =
+    let
+        colorButton : Css.Color -> Css.Color -> Html Msg
+        colorButton c activeColor =
+            Html.button
+                [ Html.Styled.Events.onClick (UpdatePointColor pointID c)
+                , Attrs.css
+                    [ Tw.rounded_full
+                    , Tw.border_2
+                    , if c == activeColor then
+                        Tw.border_color Theme.gray_500
+
+                      else
+                        Tw.border_color Theme.gray_100
+                    , Tw.h_8
+                    , Tw.w_8
+                    , Css.backgroundColor c
+                    ]
                 ]
-                ellipse
-            )
-        , SvgStyled.text_
-            [ SvgStyledAttr.x (String.fromFloat (coors.x + 12))
-            , SvgStyledAttr.y (String.fromFloat (coors.y + 6))
-            , SvgStyledAttr.css
-                [ Tw.select_none
-                , Tw.text_lg
-                , Css.property "text-anchor" "start"
+                []
+    in
+    Html.div [ Attrs.css [ Tw.w_full, Tw.flex, Tw.flex_row, Tw.gap_2 ] ]
+        [ colorButton (Css.hex "#f00") value
+        , colorButton (Css.hex "#0f0") value
+        , colorButton (Css.hex "#0ff") value
+        , colorButton (Css.hex "#00f") value
+        , colorButton (Css.hex "#f0f") value
+        , Html.input
+            [ Attrs.type_ "color"
+            , Html.Styled.Events.onInput (\colorString -> UpdatePointColor pointID (Css.hex colorString))
+            , Attrs.css
+                [ Css.pseudoElement "-webkit-color-swatch" [ Tw.rounded_full ]
+                , Css.pseudoElement "-webkit-color-swatch-wrapper" [ Tw.p_0 ]
+                , Css.pseudoElement "-moz-color-swatch" [ Tw.rounded_full ]
+                , Tw.rounded_full
+                , Tw.border_2
+                , Tw.h_8
+                , Tw.w_8
+                , Tw.cursor_pointer
                 ]
             ]
-            [ SvgStyled.text point.title ]
+            []
         ]
 
 
 subscriptions : Model -> Sub Msg
-subscriptions _ =
-    Sub.none
+subscriptions model =
+    case model.route of
+        Route.Show _ _ ->
+            Sub.none
+
+        Route.Edit _ hill ->
+            Sub.map UpdateHill (Hill.subscriptions hill)
 
 
 main : Program () Model Msg
