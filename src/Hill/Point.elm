@@ -1,4 +1,4 @@
-module Point exposing (Point, PointID, fromString, id, init, map, params, toString)
+module Hill.Point exposing (Point, PointID, fromString, id, init, map, params, toString)
 
 import Css
 import Json.Decode as Decode exposing (Decoder)
@@ -47,25 +47,31 @@ init point =
 
 
 toString : Point -> String
-toString (Point (PointID pointID) point) =
-    String.join ";"
-        [ point.title
-        , String.fromInt point.value
-        , point.color.value
-        , String.fromInt pointID
+toString point =
+    Encode.encode 0 (encode point)
+
+
+encode : Point -> Encode.Value
+encode (Point (PointID pointID) p) =
+    Encode.object
+        [ ( "i", Encode.int pointID )
+        , ( "t", Encode.string p.title )
+        , ( "v", Encode.int p.value )
+        , ( "c", Encode.string p.color.value )
         ]
 
 
 fromString : String -> Maybe Point
 fromString string =
-    case String.split ";" string of
-        [ title, stringValue, color, stringID ] ->
-            case ( String.toInt stringValue, String.toInt stringID ) of
-                ( Just value, Just pointID ) ->
-                    Just (Point (PointID pointID) { title = title, value = value, color = Css.hex color })
+    string
+        |> Decode.decodeString decoder
+        |> Result.toMaybe
 
-                _ ->
-                    Nothing
 
-        _ ->
-            Nothing
+decoder : Decoder Point
+decoder =
+    Decode.map4 (\pointID title value color -> Point (PointID pointID) { title = title, color = color, value = value })
+        (Decode.field "i" Decode.int)
+        (Decode.field "t" Decode.string)
+        (Decode.field "v" Decode.int)
+        (Decode.field "c" (Decode.map Css.hex Decode.string))

@@ -1,0 +1,26 @@
+{
+	"name": "elmhill-chart",
+	"version": "1.0.0",
+	"description": "Hill chart implementation in elm",
+	"keywords": [
+		"elm",
+		"hillchart"
+	],
+	"scripts": {
+		"dev": "elm-live src/Main.elm -u -- --debug",
+		"build": "elm make src/Main.elm  --optimize",
+		"test": "elm-test",
+		"lint": "npm run lint:format && npm run lint:review",
+		"lint:review": "elm-review",
+		"lint:format": "elm-format --validate ./src"
+	},
+	"author": "Hauke Ingwersen <me@hing.dev>",
+	"license": "MIT",
+	"devDependencies": {
+		"elm": "^0.19.1-6",
+		"elm-format": "^0.8.7",
+		"elm-live": "^4.0.2",
+		"elm-review": "^2.12.0",
+		"elm-test": "^0.19.1-revision12"
+	}
+}

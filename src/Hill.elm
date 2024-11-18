@@ -3,7 +3,6 @@ module Hill exposing
     , Msg
     , addPoint
     , fromPoints
-    , init
     , points
     , removePoint
     , subscriptions
@@ -19,11 +18,11 @@ import Dict
 import Direction2d
 import Ellipse2d
 import Geometry.Svg
+import Hill.Point exposing (Point, PointID)
 import Html.Styled as Html exposing (Html)
 import Html.Styled.Events as Events
 import Json.Decode as Decode exposing (Decoder)
 import Pixels
-import Point exposing (Point(..), PointID)
 import Point2d
 import Svg.Attributes
 import Svg.Styled as Svg
@@ -67,7 +66,7 @@ points (Hill _ p) =
 addPoint : { title : String, color : Css.Color, value : Int } -> Hill -> Hill
 addPoint point (Hill drag ps) =
     Hill drag
-        (Point.init
+        (Hill.Point.init
             { title = point.title
             , id = List.length ps
             , color = point.color
@@ -89,7 +88,7 @@ removePointHelp id ps =
             []
 
         x :: xs ->
-            if Point.id x == id then
+            if Hill.Point.id x == id then
                 xs
 
             else
@@ -100,22 +99,6 @@ type Msg
     = StartDrag PointID Int
     | StopDrag
     | Move Int
-
-
-init : List { title : String, color : Css.Color, value : Int } -> Hill
-init ps =
-    Hill None
-        (List.indexedMap
-            (\index params ->
-                Point.init
-                    { title = params.title
-                    , id = index
-                    , color = params.color
-                    , value = clamp 100 900 params.value
-                    }
-            )
-            ps
-        )
 
 
 fromPoints : List Point -> Hill
@@ -136,7 +119,7 @@ update msg (Hill drag ps) =
             case drag of
                 Dragging pointID startX ->
                     updatePoint
-                        (Point.map
+                        (Hill.Point.map
                             (\params ->
                                 { params
                                     | value =
@@ -277,7 +260,7 @@ updatePoint fn id (Hill drag ps) =
     Hill drag
         (List.map
             (\point ->
-                if Point.id point == id then
+                if Hill.Point.id point == id then
                     fn point
 
                 else
@@ -290,6 +273,7 @@ updatePoint fn id (Hill drag ps) =
 pointPosition : Int -> Point2d.Point2d Pixels.Pixels coords
 pointPosition value =
     let
+        normalized : Int
         normalized =
             value - 100
     in
@@ -308,7 +292,7 @@ viewPoints ps =
         (\point acc ->
             let
                 { value } =
-                    Point.params point
+                    Hill.Point.params point
 
                 cluster : Int
                 cluster =
@@ -335,20 +319,23 @@ viewGroupedPoints =
 viewPoint : Int -> Point -> Html Msg
 viewPoint stackLevel point =
     let
+        params : { title : String, value : Int, color : Css.Color }
         params =
-            Point.params point
+            Hill.Point.params point
 
+        pointPos : Point2d.Point2d Pixels.Pixels coords
         pointPos =
             params.value
                 |> pointPosition
                 |> Point2d.translateBy (Vector2d.pixels 0 (negate (toFloat stackLevel) * 18))
 
+        coords : { x : Float, y : Float }
         coords =
             pointPos
                 |> Point2d.toRecord Pixels.toFloat
     in
     Svg.g
-        [ dragStartEvent (Point.id point)
+        [ dragStartEvent (Hill.Point.id point)
         ]
         [ Svg.fromUnstyled
             (Geometry.Svg.ellipse2d

@@ -5,10 +5,10 @@ import Browser.Navigation as Navigation exposing (Key)
 import Css
 import Css.Global
 import Hill exposing (Hill)
+import Hill.Point exposing (Point, PointID)
 import Html.Styled as Html exposing (Html)
 import Html.Styled.Attributes as Attrs
 import Html.Styled.Events
-import Point exposing (Point(..), PointID)
 import Route exposing (Route)
 import Tailwind.Theme as Theme
 import Tailwind.Utilities as Tw
@@ -80,7 +80,7 @@ update msg model =
             ( { model
                 | route =
                     mapHill
-                        (Hill.updatePoint (Point.map (\params -> { params | title = title }))
+                        (Hill.updatePoint (Hill.Point.map (\params -> { params | title = title }))
                             pointID
                         )
                         model.route
@@ -92,7 +92,7 @@ update msg model =
             ( { model
                 | route =
                     mapHill
-                        (Hill.updatePoint (Point.map (\point -> { point | color = color })) pointID)
+                        (Hill.updatePoint (Hill.Point.map (\point -> { point | color = color })) pointID)
                         model.route
               }
             , Cmd.none
@@ -265,18 +265,24 @@ viewForm hill =
 viewPointForm : Point -> Html Msg
 viewPointForm point =
     let
+        params : { title : String, value : Int, color : Css.Color }
         params =
-            Point.params point
+            Hill.Point.params point
+
+        id : PointID
+        id =
+            Hill.Point.id point
     in
     Html.div [ Attrs.css [ Tw.flex, Tw.w_full, Tw.flex_row, Tw.gap_4 ] ]
         [ Html.input
             [ Attrs.type_ "string"
-            , Html.Styled.Events.onInput (UpdatePointTitle (Point.id point))
+            , Html.Styled.Events.onInput (UpdatePointTitle id)
             , Attrs.value params.title
             , Attrs.css [ Tw.border, Tw.px_4, Tw.py_1, Tw.w_full, Tw.rounded_md ]
             ]
             []
-        , viewColorInput (Point.id point) params.color
+        , viewColorInput id params.color
+        , viewButton (RemovePoint id) "Remove"
         ]
 
 
