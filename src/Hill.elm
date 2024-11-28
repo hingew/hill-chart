@@ -18,10 +18,12 @@ import Dict
 import Direction2d
 import Ellipse2d
 import Geometry.Svg
+import Hill.Confetti
 import Hill.Point exposing (Point, PointID)
 import Html.Styled as Html exposing (Html)
 import Html.Styled.Events as Events
 import Json.Decode as Decode exposing (Decoder)
+import Particle.System
 import Pixels
 import Point2d
 import Svg.Attributes
@@ -32,7 +34,7 @@ import Vector2d
 
 
 type Hill
-    = Hill Drag (List Point)
+    = Hill Drag Hill.Confetti.Model (List Point)
 
 
 type Drag
@@ -59,13 +61,14 @@ hillLeft =
 
 
 points : Hill -> List Point
-points (Hill _ p) =
+points (Hill _ _ p) =
     p
 
 
 addPoint : { title : String, color : Css.Color, value : Int } -> Hill -> Hill
-addPoint point (Hill drag ps) =
+addPoint point (Hill drag confetti ps) =
     Hill drag
+        confetti
         (Hill.Point.init
             { title = point.title
             , id = List.length ps
@@ -77,8 +80,8 @@ addPoint point (Hill drag ps) =
 
 
 removePoint : PointID -> Hill -> Hill
-removePoint id (Hill drag ps) =
-    Hill drag (removePointHelp id ps)
+removePoint id (Hill drag confetti ps) =
+    Hill drag confetti (removePointHelp id ps)
 
 
 removePointHelp : PointID -> List Point -> List Point
@@ -99,21 +102,31 @@ type Msg
     = StartDrag PointID Int
     | StopDrag
     | Move Int
+    | ConfettiMsg Hill.Confetti.Msg
 
 
 fromPoints : List Point -> Hill
 fromPoints ps =
-    Hill None ps
+    Hill None Hill.Confetti.init ps
 
 
 update : Msg -> Hill -> Hill
-update msg (Hill drag ps) =
+update msg (Hill drag confetti ps) =
     case msg of
         StartDrag id x ->
-            Hill (Dragging id x) ps
+            Hill (Dragging id x) confetti ps
 
         StopDrag ->
-            Hill None ps
+            case drag of
+                Dragging pointID _ ->
+                    if shouldCelebrate pointID ps then
+                        Hill None (Hill.Confetti.burst 500 500 confetti) ps
+
+                    else
+                        Hill None confetti ps
+
+                _ ->
+                    Hill None confetti ps
 
         Move endX ->
             case drag of
@@ -128,23 +141,26 @@ update msg (Hill drag ps) =
                             )
                         )
                         pointID
-                        (Hill (Dragging pointID endX) ps)
+                        (Hill (Dragging pointID endX) confetti ps)
 
                 None ->
-                    Hill None ps
+                    Hill None confetti ps
+
+        ConfettiMsg confettiMsg ->
+            Hill drag (Hill.Confetti.update confettiMsg confetti) ps
 
 
 view : Hill -> Html Msg
-view (Hill _ ps) =
+view (Hill _ confetti ps) =
     Svg.svg
         [ SAttrs.width "1000"
         , SAttrs.height "500"
         , SAttrs.viewBox "0 0 1000 500"
         ]
-        (viewHill :: viewPoints ps)
+        (Hill.Confetti.view confetti :: viewHill :: viewPoints ps)
 
 
-viewHill : Html Msg
+viewHill : Svg.Svg Msg
 viewHill =
     Svg.g []
         [ Svg.fromUnstyled
@@ -220,15 +236,16 @@ viewHill =
 {-| Handle mouse subscriptions used for dragging
 -}
 subscriptions : Hill -> Sub Msg
-subscriptions (Hill drag _) =
+subscriptions (Hill drag confetti _) =
     case drag of
         None ->
-            Sub.none
+            Sub.map ConfettiMsg (Hill.Confetti.subscriptions confetti)
 
         Dragging _ _ ->
             Sub.batch
                 [ Browser.Events.onMouseMove <| Decode.map Move positionDecoder
                 , Browser.Events.onMouseUp <| Decode.succeed StopDrag
+                , Sub.map ConfettiMsg (Hill.Confetti.subscriptions confetti)
                 ]
 
 
@@ -256,8 +273,9 @@ positionDecoder =
 
 
 updatePoint : (Point -> Point) -> PointID -> Hill -> Hill
-updatePoint fn id (Hill drag ps) =
+updatePoint fn id (Hill drag confetti ps) =
     Hill drag
+        confetti
         (List.map
             (\point ->
                 if Hill.Point.id point == id then
@@ -286,7 +304,21 @@ pointPosition value =
         CubicSpline2d.pointOn hillLeft (toFloat normalized / 400)
 
 
-viewPoints : List Point -> List (Html Msg)
+shouldCelebrate : PointID -> List Point -> Bool
+shouldCelebrate pointID ps =
+    case ps of
+        [] ->
+            False
+
+        x :: xs ->
+            if Hill.Point.id x == pointID && (Hill.Point.params x).value == 900 then
+                True
+
+            else
+                shouldCelebrate pointID xs
+
+
+viewPoints : List Point -> List (Svg.Svg Msg)
 viewPoints ps =
     List.foldl
         (\point acc ->
@@ -311,12 +343,12 @@ viewPoints ps =
         |> List.concatMap viewGroupedPoints
 
 
-viewGroupedPoints : List Point -> List (Html Msg)
+viewGroupedPoints : List Point -> List (Svg.Svg Msg)
 viewGroupedPoints =
     List.indexedMap viewPoint
 
 
-viewPoint : Int -> Point -> Html Msg
+viewPoint : Int -> Point -> Svg.Svg Msg
 viewPoint stackLevel point =
     let
         params : { title : String, value : Int, color : Css.Color }
